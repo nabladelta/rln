@@ -22,8 +22,5 @@
       {
         "path": "./packages/rln"
       },
-      {
-        "path": "./packages/lambdadelta"
-      }
     ]
   }

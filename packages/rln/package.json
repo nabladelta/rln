@@ -10,14 +10,19 @@
     "types": "./dist/src/index.d.ts"
   },
   "scripts": {
-    "prepublish": "tsc --build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --coverage",
+    "prepublish": "npm run build",
+    "build": "tsc --build --verbose",
+    "postbuild": "run-s copycircuits",
+    "copycircuits": "copyfiles -u 2 ./compiled/** ./dist"
   },
   "author": "reilgun",
   "license": "MIT",
   "devDependencies": {
     "supertest": "^6.3.3",
-    "tiny-typed-emitter": "^2.1.0"
+    "tiny-typed-emitter": "^2.1.0",
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.0"
   },
   "dependencies": {
     "@semaphore-protocol/group": "^3.2.3",

@@ -18,7 +18,7 @@ async function run(name, scheme, tauname) {
     const circuitFile = path.join(root, 'circuits', name+'.circom')
     const setup = path.join(build, 'setup', scheme, name)
 
-    const rlnlib = path.join(root, '..', 'rln')
+    const rlnlib = path.join(root, '..')
     const dest = path.join(rlnlib, 'compiled', name)
     if (!existsSync(tauFile)) {
         const tauURL = `https://hermez.s3-eu-west-1.amazonaws.com/${tauname}`
