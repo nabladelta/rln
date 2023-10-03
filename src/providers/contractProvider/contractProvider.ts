@@ -3,7 +3,6 @@ import { poseidon1 } from 'poseidon-lite'
 import { ethers } from "ethers"
 import { RLNContract } from "./contractWrapper"
 import { WithdrawProver } from 'rlnjs'
-
 export interface GroupFile {
     id: string,
     treeDepth: number,
