@@ -16,11 +16,4 @@
         "./node_modules/@types"
       ]
     },
-    "files": [
-    ],
-    "references": [
-      {
-        "path": "./packages/rln"
-      },
-    ]
-  }
+}
