@@ -6,8 +6,6 @@ import { hashBigint, hashString } from "./utils/hash"
 import { plonk, groth16 } from 'snarkjs'
 import { BigNumberish, Group } from "@semaphore-protocol/group"
 
-export type StrBigInt = string | bigint
-
 export async function verifyProof(
         rlnFullProof: RLNGFullProof,
         config: {
@@ -138,40 +136,55 @@ async function prove(
     ): Promise<RLNGSNARKProof> {
     
     const prover = scheme === 'plonk' ? plonk : groth16
-    const { proof, publicSignals } = await prover.fullProve(
+    const { proof, publicSignals }: {proof: Proof, publicSignals: any} = await prover.fullProve(
         witness,
         wasmFilePath,
         zkeyFilePath,
         null,
     )
     const nNullifiers = witness.externalNullifiers.length
-
+    
     return {
-        proof,
+        proof: {
+            pi_a: toString(proof.pi_a),
+            pi_b: proof.pi_b.map((v) => toString(v)),
+            pi_c: toString(proof.pi_c),
+            protocol: toString(proof.protocol),
+            curve: proof.curve,
+        },
         publicSignals: {
-            y: publicSignals.slice(0, nNullifiers),
-            merkleRoot: publicSignals[nNullifiers],
-            nullifiers: publicSignals.slice(
+            y: toString(publicSignals.slice(0, nNullifiers)) as string[],
+            merkleRoot: toString(publicSignals[nNullifiers]) as string,
+            nullifiers: toString(publicSignals.slice(
                 nNullifiers + 1,
-                nNullifiers + 1 + nNullifiers),
-            signalHash: publicSignals[nNullifiers + 1 + nNullifiers],
-            externalNullifiers: publicSignals.slice(
+                nNullifiers + 1 + nNullifiers)) as string[],
+            signalHash: toString(publicSignals[nNullifiers + 1 + nNullifiers]) as string,
+            externalNullifiers: toString(publicSignals.slice(
                 nNullifiers + 1 + nNullifiers + 1,
-                nNullifiers + 1 + nNullifiers + 1 + nNullifiers),
-            messageLimits: publicSignals.slice(
+                nNullifiers + 1 + nNullifiers + 1 + nNullifiers)) as string[],
+            messageLimits: toString(publicSignals.slice(
                 nNullifiers + 1 + nNullifiers + 1 + nNullifiers,
-                nNullifiers + 1 + nNullifiers + 1 + nNullifiers + nNullifiers),
+                nNullifiers + 1 + nNullifiers + 1 + nNullifiers + nNullifiers)) as string[],
         }
+    }
+}
+function toString<T extends string | bigint | Array<string | bigint>>(input: T): 
+    T extends Array<any> ? string[] : string {
+    
+    if (Array.isArray(input)) {
+        return input.map(item => item.toString()) as any;
+    } else {
+        return input.toString() as any;
     }
 }
 
 export interface RLNGPublicSignals {
-    y: StrBigInt[]
-    merkleRoot: StrBigInt
-    nullifiers: StrBigInt[]
-    signalHash: StrBigInt
-    externalNullifiers: StrBigInt[]
-    messageLimits: StrBigInt[]
+    y: string[]
+    merkleRoot: string
+    nullifiers: string[]
+    signalHash: string
+    externalNullifiers: string[]
+    messageLimits: string[]
 }
 
 export interface RLNGSNARKProof {
@@ -180,9 +193,9 @@ export interface RLNGSNARKProof {
 }
 
 export interface Proof {
-    pi_a: StrBigInt[]
-    pi_b: StrBigInt[][]
-    pi_c: StrBigInt[]
+    pi_a: string[]
+    pi_b: string[][]
+    pi_c: string[]
     protocol: string
     curve: string
 }
