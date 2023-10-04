@@ -1,6 +1,6 @@
 {
   "name": "@nabladelta/rln",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "RLN library for Lambdadelta",
   "main": "src/index.ts",
   "repository": "https://github.com/nabladelta/rln",
