@@ -7,12 +7,12 @@ import { retrieveSecret } from "./utils/recovery"
 import { GroupData, MemoryProvider } from "./providers/memory"
 
 export enum VerificationResult {
-    VALID,
-    INVALID,
-    MISSING_ROOT,
-    OUT_OF_RANGE,
-    DUPLICATE,
-    BREACH
+    VALID = "VALID",
+    INVALID = "INVALID",
+    MISSING_ROOT = "MISSING_ROOT",
+    OUT_OF_RANGE = "OUT_OF_RANGE",
+    DUPLICATE = "DUPLICATE",
+    BREACH = "BREACH"
 }
 
 /**
