@@ -1,6 +1,6 @@
 {
   "name": "@nabladelta/rln",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "RLN library for Lambdadelta",
   "main": "src/index.ts",
   "repository": "https://github.com/nabladelta/rln",
@@ -34,10 +34,10 @@
   "dependencies": {
     "@semaphore-protocol/group": "^3.2.3",
     "@semaphore-protocol/identity": "^3.2.3",
-    "dotenv": "^16.0.3",
+    "dotenv": "^16.3.1",
     "ethers": "^6.7.1",
     "poseidon-lite": "^0.2.0",
-    "rlnjs": "^3.2.3",
-    "snarkjs": "^0.7.0"
+    "rlnjs": "^3.3.0",
+    "snarkjs": "^0.7.1"
   }
 }
