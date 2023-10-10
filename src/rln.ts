@@ -20,11 +20,11 @@ export enum VerificationResult {
  */
 export class RLN {
     private provider: GroupDataProvider
-    private settings: {vKey: any, scheme: "groth16" | "plonk"}
     private identity: Identity
     public expiredTolerance: number
     private knownNullifiers: Map<bigint, RLNGFullProof[]> // nullifier => Proof (cache)
     private verifierSettings: {
+        vKey: any,
         userMessageLimitMultiplier: number,
         scheme: 'groth16' | 'plonk'
         wasmFilePath: string
@@ -32,13 +32,12 @@ export class RLN {
     }
 
     private constructor(provider: GroupDataProvider, secret?: string) {
-        this.settings = getZKFiles('rln-multiplier-generic', 'groth16')
         this.provider = provider
         this.knownNullifiers = new Map()
         this.expiredTolerance = 0
         this.identity = new Identity(secret)
-        const {files, scheme} = getZKFiles('rln-multiplier-generic', 'groth16')
-        this.verifierSettings = {...files, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!, scheme}
+        const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
+        this.verifierSettings = {...files, vKey, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!, scheme}
     }
 
     public static async load(secret: string, filename: string): Promise<RLN> {
@@ -60,7 +59,7 @@ export class RLN {
         const [start, end] = await this.provider.getRootTimeRange(BigInt(root))
         if (!start) return VerificationResult.MISSING_ROOT
 
-        const result = await verifyProof(proof, this.settings)
+        const result = await verifyProof(proof, this.verifierSettings)
 
         if (!result) return VerificationResult.INVALID
         if (!claimedTime) return VerificationResult.VALID
