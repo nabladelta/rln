@@ -29,12 +29,12 @@
     "supertest": "^6.3.3",
     "tiny-typed-emitter": "^2.1.0",
     "ts-jest": "^29.0.5",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.1",
+    "dotenv": "^16.3.1"
   },
   "dependencies": {
     "@semaphore-protocol/group": "^3.2.3",
     "@semaphore-protocol/identity": "^3.2.3",
-    "dotenv": "^16.3.1",
     "ethers": "^6.7.1",
     "poseidon-lite": "^0.2.0",
     "rlnjs": "^3.3.0",
