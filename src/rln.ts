@@ -31,27 +31,28 @@ export class RLN {
         zkeyFilePath: string
     }
 
-    private constructor(provider: GroupDataProvider, secret?: string) {
+    private constructor(provider: GroupDataProvider, zkFiles: {wasmFilePath: string, zkeyFilePath: string, scheme: 'groth16' | 'plonk', vKey: any}, secret?: string) {
         this.provider = provider
         this.knownNullifiers = new Map()
         this.expiredTolerance = 0
         this.identity = new Identity(secret)
-        const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
-        this.verifierSettings = {...files, vKey, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!, scheme}
+        this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
     }
 
     public static async load(secret: string, filename: string): Promise<RLN> {
         const provider = await FileProvider.load(filename)
-        return new RLN(provider, secret)
+        const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
+        return new RLN(provider, {...files, scheme, vKey}, secret)
     }
 
     public static async loadMemory(secret: string, groupData: GroupData) {
         const provider = await MemoryProvider.load(groupData)
-        return new RLN(provider, secret)
+        const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
+        return new RLN(provider, {...files, scheme, vKey}, secret)
     }
 
-    public static async loadCustom(secret: string, provider: GroupDataProvider) {
-        return new RLN(provider, secret)
+    public static async loadCustom(secret: string, provider: GroupDataProvider, zkFiles: {wasmFilePath: string, zkeyFilePath: string, scheme: 'groth16' | 'plonk', vKey: any}) {
+        return new RLN(provider, zkFiles, secret)
     }
 
     public async verify(proof: RLNGFullProof, claimedTime?: number) {

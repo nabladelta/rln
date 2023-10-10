@@ -1,8 +1,13 @@
 {
   "name": "@nabladelta/rln",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "RLN library for Lambdadelta",
   "main": "src/index.ts",
+  "browser": {
+    "fs": false,
+    "path": false,
+    "fs/promises": false
+  },
   "repository": "https://github.com/nabladelta/rln",
   "exports": {
     "import": "./src/index.ts",
