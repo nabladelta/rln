@@ -1,219 +1,147 @@
-import { Identity } from '@semaphore-protocol/identity'
-import { MerkleProof } from "@zk-kit/incremental-merkle-tree"
-import { poseidon2 } from 'poseidon-lite'
-import { hashBigint, hashString } from "./utils/hash"
-// @ts-ignore
-import { plonk, groth16 } from 'snarkjs'
-import { BigNumberish, Group } from "@semaphore-protocol/group"
+import { Identity } from "@semaphore-protocol/identity"
+import { GroupDataProvider } from "./providers/dataProvider"
+import { FileProvider } from "./providers/file"
+import { generateProof, nullifierInput, RLNGFullProof, verifyProof } from "./rlnProof"
+import { getZKFiles } from "./utils/files"
+import { retrieveSecret } from "./utils/recovery"
+import { GroupData, MemoryProvider } from "./providers/memory"
 
-export async function verifyProof(
-        rlnFullProof: RLNGFullProof,
-        config: {
-            vKey: any,
-            scheme: 'groth16' | 'plonk'
-        }
-    ): Promise<boolean> {
-    const { publicSignals, proof } = rlnFullProof.snarkProof
+export enum VerificationResult {
+    VALID = "VALID",
+    INVALID = "INVALID",
+    MISSING_ROOT = "MISSING_ROOT",
+    OUT_OF_RANGE = "OUT_OF_RANGE",
+    DUPLICATE = "DUPLICATE",
+    BREACH = "BREACH"
+}
 
-    for (let i = 0; i < publicSignals.externalNullifiers.length; i++) {
-        const expectedExtNullifier = poseidon2([
-            hashString(rlnFullProof.externalNullifiers[i].nullifier),
-            hashString(rlnFullProof.rlnIdentifier)
-        ])
-
-        if (expectedExtNullifier !== BigInt(publicSignals.externalNullifiers[i])) {
-            return false
-        }
-
-        const expectedLimit = BigInt(rlnFullProof.externalNullifiers[i].messageLimit)
-        if (expectedLimit !== BigInt(publicSignals.messageLimits[i])) {
-            return false
-        }
+/**
+ * Cretes & verifies RLN proofs
+ */
+export class RLN {
+    private provider: GroupDataProvider
+    private settings: {vKey: any, scheme: "groth16" | "plonk"}
+    private identity: Identity
+    public expiredTolerance: number
+    private knownNullifiers: Map<bigint, RLNGFullProof[]> // nullifier => Proof (cache)
+    private verifierSettings: {
+        userMessageLimitMultiplier: number,
+        scheme: 'groth16' | 'plonk'
+        wasmFilePath: string
+        zkeyFilePath: string
     }
 
-    const expectedSignalHash = hashString(rlnFullProof.signal)
-    if (expectedSignalHash !== BigInt(publicSignals.signalHash)) {
-        return false
+    private constructor(provider: GroupDataProvider, secret?: string) {
+        this.settings = getZKFiles('rln-multiplier-generic', 'groth16')
+        this.provider = provider
+        this.knownNullifiers = new Map()
+        this.expiredTolerance = 0
+        this.identity = new Identity(secret)
+        const {files, scheme} = getZKFiles('rln-multiplier-generic', 'groth16')
+        this.verifierSettings = {...files, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!, scheme}
     }
-    let { scheme, vKey } = config
-    const prover = scheme === 'plonk' ? plonk : groth16
-    return prover.verify(
-        vKey,
-        [
-            publicSignals.y,
-            publicSignals.merkleRoot,
-            publicSignals.nullifiers,
-            publicSignals.signalHash,
-            publicSignals.externalNullifiers,
-            publicSignals.messageLimits
-        ].flat(),
-        proof,
-    )
-}
 
-export interface nullifierInput {
-    nullifier: string
-    messageId: number
-    messageLimit: number
-}
+    public static async load(secret: string, filename: string): Promise<RLN> {
+        const provider = await FileProvider.load(filename)
+        return new RLN(provider, secret)
+    }
 
-export interface nullifierOutput {
-    nullifier: string
-    messageLimit: number
-}
+    public static async loadMemory(secret: string, groupData: GroupData) {
+        const provider = await MemoryProvider.load(groupData)
+        return new RLN(provider, secret)
+    }
 
-export async function generateProof(
-        identity: Identity,
-        groupOrMerkleProof: Group | MerkleProof,
-        externalNullifiers: nullifierInput[],
-        signal: string,
-        config: {
+    public static async loadCustom(secret: string, provider: GroupDataProvider) {
+        return new RLN(provider, secret)
+    }
+
+    public async verify(proof: RLNGFullProof, claimedTime?: number) {
+        const root = proof.snarkProof.publicSignals.merkleRoot
+        const [start, end] = await this.provider.getRootTimeRange(BigInt(root))
+        if (!start) return VerificationResult.MISSING_ROOT
+
+        const result = await verifyProof(proof, this.settings)
+
+        if (!result) return VerificationResult.INVALID
+        if (!claimedTime) return VerificationResult.VALID
+        if (!end
+            && claimedTime >= start)
+                return VerificationResult.VALID
+        if (end
+            && claimedTime >= start 
+            && claimedTime <= (end + this.expiredTolerance)) 
+                return VerificationResult.VALID
+
+        return VerificationResult.OUT_OF_RANGE
+    }
+
+    public async submitProof(proof: RLNGFullProof, claimedTime?: number) {
+        const res = await this.verify(proof, claimedTime)
+        if (res == VerificationResult.INVALID || res == VerificationResult.MISSING_ROOT) {
+            // There is no point in storing a proof that is either not correct, or from a different group
+            return res
+        }
+        let slashes = 0
+        for (let i = 0; i < proof.snarkProof.publicSignals.nullifiers.length; i++) {
+            const nullifier = BigInt(proof.snarkProof.publicSignals.nullifiers[i])
+            // Same nullifier
+            const known = this.knownNullifiers.get(nullifier) || []
+            // Find any that have same nullifier and signal
+            const duplicates = known.filter(p => 
+                p.snarkProof.publicSignals.signalHash 
+                ===
+                proof.snarkProof.publicSignals.signalHash)
+
+            if (duplicates.length > 0) {
+                return VerificationResult.DUPLICATE
+            }
+            // Not a duplicate proof, add it
+            known.push(proof)
+            this.knownNullifiers.set(nullifier, known)
+            // Not a duplicate, first one with this nullifier
+            if (known.length == 1) continue
+
+            // We found a slashing target
+            slashes++
+            if (slashes > 1) continue // Can't slash same user twice
+
+            const secret = await retrieveSecret(known, i)
+            await this.provider.slash(secret)
+        }
+        if (slashes > 0) return VerificationResult.BREACH
+
+        return res
+    }
+
+    public async createProof(
+            signal: string,
+            externalNullifiers: nullifierInput[],
             rlnIdentifier: string,
-            userMessageLimitMultiplier: number,
-            scheme: 'groth16' | 'plonk'
-            wasmFilePath: string
-            zkeyFilePath: string
-        },
-    ): Promise<RLNGFullProof> {
+            checkCache: boolean = false) {
 
-    let merkleProof: MerkleProof
+        const merkleProof = this.provider
+            .createMerkleProof(
+                this.identity.commitment,
+                this.verifierSettings.userMessageLimitMultiplier)
 
-    let {
-        rlnIdentifier,
-        userMessageLimitMultiplier,
-        scheme,
-        wasmFilePath,
-        zkeyFilePath
-    } = config
+        const proof = await generateProof(
+            this.identity,
+            merkleProof,
+            externalNullifiers,
+            signal,
+            {
+                rlnIdentifier,
+               ...this.verifierSettings
+            })
 
-    if ("depth" in groupOrMerkleProof) {
-        rlnIdentifier = groupOrMerkleProof.id.toString()
-        const index = groupOrMerkleProof.indexOf(poseidon2([identity.commitment, BigInt(userMessageLimitMultiplier)]))
-        
-        if (index === -1) {
-            throw new Error("The identity is not part of the group")
+        if (checkCache) {
+            const matches = proof.snarkProof.publicSignals
+                .nullifiers.filter(n => this.knownNullifiers.get(BigInt(n)))
+
+            if (matches.length > 0) {
+                throw new Error("Duplicate nullifier found")
+            }
         }
-
-        merkleProof = groupOrMerkleProof.generateMerkleProof(index)
-    } else {
-        merkleProof = groupOrMerkleProof
+        return proof
     }
-
-    const witness: RLNGWitnessT = {
-        identitySecret: poseidon2([identity.nullifier, identity.trapdoor]),
-        pathElements: merkleProof.siblings,
-        identityPathIndex: merkleProof.pathIndices,
-        x: hashString(signal),
-        userMessageLimitMultiplier: BigInt(userMessageLimitMultiplier),
-        externalNullifiers: externalNullifiers.map(e => poseidon2([
-            hashString(e.nullifier),
-            hashString(rlnIdentifier)
-        ])),
-        messageIds: externalNullifiers.map(e => BigInt(e.messageId)),
-        messageLimits: externalNullifiers.map(e => BigInt(e.messageLimit))
-    }
-    return {
-        snarkProof: await prove(
-            witness,
-            wasmFilePath,
-            zkeyFilePath,
-            scheme
-        ),
-        signal,
-        externalNullifiers: externalNullifiers
-            .map(({ nullifier, messageLimit }) => (
-                    { nullifier, messageLimit }
-                )),
-        rlnIdentifier: rlnIdentifier
-    }
-}
-
-async function prove(
-        witness: RLNGWitnessT,
-        wasmFilePath: string,
-        zkeyFilePath: string,
-        scheme?: 'groth16' | 'plonk'
-    ): Promise<RLNGSNARKProof> {
-    
-    const prover = scheme === 'plonk' ? plonk : groth16
-    const { proof, publicSignals }: {proof: Proof, publicSignals: any} = await prover.fullProve(
-        witness,
-        wasmFilePath,
-        zkeyFilePath,
-        null,
-    )
-    const nNullifiers = witness.externalNullifiers.length
-    
-    return {
-        proof: {
-            pi_a: toString(proof.pi_a),
-            pi_b: proof.pi_b.map((v) => toString(v)),
-            pi_c: toString(proof.pi_c),
-            protocol: toString(proof.protocol),
-            curve: proof.curve,
-        },
-        publicSignals: {
-            y: toString(publicSignals.slice(0, nNullifiers)) as string[],
-            merkleRoot: toString(publicSignals[nNullifiers]) as string,
-            nullifiers: toString(publicSignals.slice(
-                nNullifiers + 1,
-                nNullifiers + 1 + nNullifiers)) as string[],
-            signalHash: toString(publicSignals[nNullifiers + 1 + nNullifiers]) as string,
-            externalNullifiers: toString(publicSignals.slice(
-                nNullifiers + 1 + nNullifiers + 1,
-                nNullifiers + 1 + nNullifiers + 1 + nNullifiers)) as string[],
-            messageLimits: toString(publicSignals.slice(
-                nNullifiers + 1 + nNullifiers + 1 + nNullifiers,
-                nNullifiers + 1 + nNullifiers + 1 + nNullifiers + nNullifiers)) as string[],
-        }
-    }
-}
-function toString<T extends string | bigint | Array<string | bigint>>(input: T): 
-    T extends Array<any> ? string[] : string {
-    
-    if (Array.isArray(input)) {
-        return input.map(item => item.toString()) as any;
-    } else {
-        return input.toString() as any;
-    }
-}
-
-export interface RLNGPublicSignals {
-    y: string[]
-    merkleRoot: string
-    nullifiers: string[]
-    signalHash: string
-    externalNullifiers: string[]
-    messageLimits: string[]
-}
-
-export interface RLNGSNARKProof {
-    proof: Proof
-    publicSignals: RLNGPublicSignals
-}
-
-export interface Proof {
-    pi_a: string[]
-    pi_b: string[][]
-    pi_c: string[]
-    protocol: string
-    curve: string
-}
-
-export interface RLNGFullProof {
-    snarkProof: RLNGSNARKProof
-    signal: string
-    rlnIdentifier: string
-    externalNullifiers: nullifierOutput[]
-}
-
-export interface RLNGWitnessT {
-    identitySecret: bigint
-    userMessageLimitMultiplier: bigint
-    messageIds: bigint[]
-    pathElements: any[]
-    identityPathIndex: number[]
-    x: string | bigint
-    externalNullifiers: bigint[]
-    messageLimits: bigint[]
 }

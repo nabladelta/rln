@@ -3,7 +3,7 @@ import { Identity } from '@semaphore-protocol/identity'
 import { IncrementalMerkleTree } from "@zk-kit/incremental-merkle-tree"
 import { poseidon2 } from 'poseidon-lite'
 import { Group } from "@semaphore-protocol/group"
-import { RLNGFullProof } from '../src/rln'
+import { RLNGFullProof } from '../src/rlnProof'
 import { hashBigint } from '../src/utils/hash'
 
 describe('RLN', () => {

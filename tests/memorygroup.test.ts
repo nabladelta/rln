@@ -4,7 +4,7 @@ import { Identity } from '@semaphore-protocol/identity'
 import { getTimestampInSeconds } from '../src/utils/time'
 import { GroupDataProvider } from '../src/providers/dataProvider'
 import { FileProvider } from '../src/providers/file'
-import { RLN, VerificationResult } from '../src/verifier'
+import { RLN, VerificationResult } from '../src/rln'
 import { MemoryProvider } from '../src/providers/memory'
 
 

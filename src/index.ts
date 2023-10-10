@@ -1,10 +1,12 @@
-import { RLN, VerificationResult } from "./verifier"
-import { RLNGFullProof, nullifierInput } from "./rln"
+import { RLN, VerificationResult } from "./rln"
+import { RLNGFullProof, nullifierInput, Proof, nullifierOutput, RLNGSNARKProof, RLNGPublicSignals, RLNGWitnessT } from "./rlnProof"
 import { GroupDataProvider } from "./providers/dataProvider"
 import { FileProvider } from "./providers/file"
 import { MemoryProvider, GroupData } from "./providers/memory"
 import { ContractProvider } from "./providers/contractProvider/contractProvider"
-
-export { RLN, RLNGFullProof, 
+import { RLNContract } from "./providers/contractProvider/contractWrapper"
+export { RLN, RLNGFullProof, Proof, nullifierOutput,
+        RLNGSNARKProof, RLNGPublicSignals, RLNGWitnessT,
         nullifierInput, VerificationResult,
-        GroupDataProvider, FileProvider, MemoryProvider, GroupData, ContractProvider }
+        GroupDataProvider, FileProvider, MemoryProvider, GroupData, ContractProvider,
+        RLNContract }

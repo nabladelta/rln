@@ -1,6 +1,6 @@
 // @ts-ignore
 import { ZqField } from 'ffjavascript'
-import { RLNGFullProof } from '../rln'
+import { RLNGFullProof } from '../rlnProof'
 
 /*
   This is the "Baby Jubjub" curve described here:
