@@ -115,17 +115,37 @@ export class RLNContract {
     return this.signer.getAddress()
   }
 
-  async getLogs() {
+  async getLogs(maxRangeSize?: number) {
     const rlnContractAddress = await this.rlnContract.getAddress()
     const currentBlockNumber = await this.provider.getBlockNumber()
     if (currentBlockNumber < this.contractAtBlock) {
       throw new Error('Current block number is lower than the block number at which the contract was deployed')
     }
-    const logs = await this.provider.getLogs({
-      address: rlnContractAddress,
-      fromBlock: this.contractAtBlock,
-      toBlock: currentBlockNumber,
-    })
+    const logs: ethers.Log[] = []
+    if (maxRangeSize) {
+      let fromBlock = this.contractAtBlock
+      while (true) {
+        const toBlock = Math.min(fromBlock + maxRangeSize, currentBlockNumber)
+        logs.push(...await this.provider.getLogs({
+          address: rlnContractAddress,
+          fromBlock,
+          toBlock,
+        }))
+        if (toBlock === currentBlockNumber) {
+          break
+        }
+        fromBlock = toBlock + 1
+      }
+    } else {
+      logs.push(...await this.provider.getLogs({
+        address: rlnContractAddress,
+        fromBlock: this.contractAtBlock,
+        toBlock: currentBlockNumber,
+      }))
+    }
+
+    logs.sort((a, b) => a.blockNumber - b.blockNumber)
+
     const events = await Promise.all(logs.map(log => this.handleLog(log)))
     return events.filter(x => x !== undefined) as (EventMemberRegistered | EventMemberWithdrawn | EventMemberSlashed)[]
   }
