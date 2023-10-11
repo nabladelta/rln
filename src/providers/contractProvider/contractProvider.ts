@@ -4,6 +4,7 @@ import { ethers } from "ethers"
 import { RLNContract } from "./contractWrapper"
 import { WithdrawProver } from 'rlnjs'
 import crypto from 'crypto'
+import { Identity } from "@semaphore-protocol/identity"
 export interface GroupFile {
     id: string,
     treeDepth: number,
@@ -75,10 +76,19 @@ export class ContractProvider extends GroupDataProvider {
         return dataProvider
     }
 
-    public static async getSecret(signer: ethers.Signer, contractAddress: string): Promise<bigint> {
+    public static async secretFromSigner(signer: ethers.Signer, contractAddress: string): Promise<string> {
         const signedMessage = await signer.signMessage(`Provide membership secret for: ${contractAddress}`)
         const secret = crypto.createHash('sha256').update(signedMessage).digest('hex')
-        return BigInt('0x'+secret)
+        return secret
+    }
+
+    public static async identityFromSecret(secret: string): Promise<Identity> {
+        return new Identity(secret)
+    }
+
+    public static async identityFromSigner(signer: ethers.Signer, contractAddress: string): Promise<[Identity, string]> {
+        const secret = await this.secretFromSigner(signer, contractAddress)
+        return [new Identity(secret), secret]
     }
 
     public async slash(identitySecret: bigint) {
