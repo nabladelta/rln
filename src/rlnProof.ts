@@ -71,8 +71,8 @@ export async function generateProof(
             rlnIdentifier: string,
             userMessageLimitMultiplier: number,
             scheme: 'groth16' | 'plonk'
-            wasmFilePath: string
-            zkeyFilePath: string
+            wasmFilePath: string | Uint8Array
+            zkeyFilePath: string | Uint8Array
         },
     ): Promise<RLNGFullProof> {
 
@@ -130,8 +130,8 @@ export async function generateProof(
 
 async function prove(
         witness: RLNGWitnessT,
-        wasmFilePath: string,
-        zkeyFilePath: string,
+        wasmFilePath: string | Uint8Array,
+        zkeyFilePath: string | Uint8Array,
         scheme?: 'groth16' | 'plonk'
     ): Promise<RLNGSNARKProof> {
     

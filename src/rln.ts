@@ -27,11 +27,11 @@ export class RLN {
         vKey: any,
         userMessageLimitMultiplier: number,
         scheme: 'groth16' | 'plonk'
-        wasmFilePath: string
-        zkeyFilePath: string
+        wasmFilePath: string | Uint8Array,
+        zkeyFilePath: string | Uint8Array
     }
 
-    private constructor(provider: GroupDataProvider, zkFiles: {wasmFilePath: string, zkeyFilePath: string, scheme: 'groth16' | 'plonk', vKey: any}, secret?: string) {
+    private constructor(provider: GroupDataProvider, zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}, secret?: string) {
         this.provider = provider
         this.knownNullifiers = new Map()
         this.expiredTolerance = 0
@@ -51,7 +51,11 @@ export class RLN {
         return new RLN(provider, {...files, scheme, vKey}, secret)
     }
 
-    public static async loadCustom(secret: string, provider: GroupDataProvider, zkFiles: {wasmFilePath: string, zkeyFilePath: string, scheme: 'groth16' | 'plonk', vKey: any}) {
+    public static async loadCustom(secret: string, provider: GroupDataProvider, zkFiles?: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}) {
+        if (!zkFiles) {
+            const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
+            zkFiles = {...files, scheme, vKey}
+        }
         return new RLN(provider, zkFiles, secret)
     }
 

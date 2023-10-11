@@ -3,6 +3,7 @@ import { poseidon1 } from 'poseidon-lite'
 import { ethers } from "ethers"
 import { RLNContract } from "./contractWrapper"
 import { WithdrawProver } from 'rlnjs'
+import crypto from 'crypto'
 export interface GroupFile {
     id: string,
     treeDepth: number,
@@ -72,6 +73,12 @@ export class ContractProvider extends GroupDataProvider {
         const dataProvider = new ContractProvider(gid, treeDepth, contract, slashRewardsAddress, withdrawProver)
         await dataProvider.update()
         return dataProvider
+    }
+
+    public static async getSecret(signer: ethers.Signer, contractAddress: string): Promise<bigint> {
+        const signedMessage = await signer.signMessage(`Provide membership secret for: ${contractAddress}`)
+        const secret = crypto.createHash('sha256').update(signedMessage).digest('hex')
+        return BigInt('0x'+secret)
     }
 
     public async slash(identitySecret: bigint) {
