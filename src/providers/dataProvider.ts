@@ -59,9 +59,15 @@ export abstract class GroupDataProvider {
         }
     }
 
-    public async getRootTimeRange(root: bigint) {
+    protected getRootTimeRangeLocal(root: bigint) {
         const addedTime = this.pastRootsAdded.get(root.toString(16))
         if (addedTime) return [addedTime, this.pastRootsRemoved.get(root.toString(16))]
+        return [undefined, undefined]
+    }
+
+    public async getRootTimeRange(root: bigint) {
+        const [addedTime, removedTime] = this.getRootTimeRangeLocal(root)
+        if (addedTime) return [addedTime, removedTime]
         return await this.retrieveRoot(root.toString(16))
     }
 

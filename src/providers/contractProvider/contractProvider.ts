@@ -49,7 +49,10 @@ export class ContractProvider extends GroupDataProvider {
         return groupEvents.slice(lastEventIndex)
     }
 
-    protected async retrieveRoot(_: string) {
+    protected async retrieveRoot(root: string) {
+        await this.update()
+        const [addedTime, removedTime] = this.getRootTimeRangeLocal(BigInt(root))
+        if (addedTime) return [addedTime, removedTime]
         return [undefined, undefined]
     }
 

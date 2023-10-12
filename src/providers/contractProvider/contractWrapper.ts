@@ -62,12 +62,14 @@ export type EventMemberRegistered = {
   messageLimit: bigint,
   index: bigint,
   timestamp: number
+  blockNumber: number
 }
 
 export type EventMemberWithdrawn = {
   name: 'MemberWithdrawn',
   index: bigint,
   timestamp: number
+  blockNumber: number
 }
 
 export type EventMemberSlashed = {
@@ -75,6 +77,7 @@ export type EventMemberSlashed = {
   index: bigint,
   slasher: string,
   timestamp: number
+  blockNumber: number
 }
 
 export class RLNContract {
@@ -115,7 +118,7 @@ export class RLNContract {
     return this.signer.getAddress()
   }
 
-  async getLogs(maxRangeSize?: number) {
+  async getLogs(maxRangeSize?: number, startBlock: number = this.contractAtBlock) {
     const rlnContractAddress = await this.rlnContract.getAddress()
     const currentBlockNumber = await this.provider.getBlockNumber()
     if (currentBlockNumber < this.contractAtBlock) {
@@ -123,7 +126,7 @@ export class RLNContract {
     }
     const logs: ethers.Log[] = []
     if (maxRangeSize) {
-      let fromBlock = this.contractAtBlock
+      let fromBlock = startBlock
       while (true) {
         const toBlock = Math.min(fromBlock + maxRangeSize, currentBlockNumber)
         logs.push(...await this.provider.getLogs({
@@ -139,7 +142,7 @@ export class RLNContract {
     } else {
       logs.push(...await this.provider.getLogs({
         address: rlnContractAddress,
-        fromBlock: this.contractAtBlock,
+        fromBlock: startBlock,
         toBlock: currentBlockNumber,
       }))
     }
@@ -165,14 +168,16 @@ export class RLNContract {
         identityCommitment: decoded.identityCommitment,
         messageLimit: decoded.messageLimit,
         index: decoded.index,
-        timestamp: block.timestamp
+        timestamp: block.timestamp,
+        blockNumber: block.number,
       }
     } else if (log.topics[0] === memberWithdrawnTopics[0]) {
       const decoded = this.rlnContract.interface.decodeEventLog(memberWithdrawnFilter.fragment, log.data)
       return {
         name: 'MemberWithdrawn',
         index: decoded.index,
-        timestamp: block.timestamp
+        timestamp: block.timestamp,
+        blockNumber: block.number,
       }
     } else if (log.topics[0] === memberSlashedTopics[0]) {
       const decoded = this.rlnContract.interface.decodeEventLog(memberSlashedFilter.fragment, log.data)
@@ -180,7 +185,8 @@ export class RLNContract {
         name: 'MemberSlashed',
         index: decoded.index,
         slasher: decoded.slasher,
-        timestamp: block.timestamp
+        timestamp: block.timestamp,
+        blockNumber: block.number,
       }
     } else {
       // Just skip this log
