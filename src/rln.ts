@@ -5,6 +5,10 @@ import { generateProof, nullifierInput, RLNGFullProof, verifyProof } from "./rln
 import { getZKFiles } from "./utils/files"
 import { retrieveSecret } from "./utils/recovery"
 import { GroupData, MemoryProvider } from "./providers/memory"
+import type { Datastore } from 'interface-datastore'
+import { MemoryDatastore } from "datastore-core"
+import { Key } from 'interface-datastore'
+import AsyncLock from 'async-lock'
 
 export enum VerificationResult {
     VALID = "VALID",
@@ -14,15 +18,27 @@ export enum VerificationResult {
     DUPLICATE = "DUPLICATE",
     BREACH = "BREACH"
 }
+function stringToUint8Array(str: string): Uint8Array {
+    const encoder = new TextEncoder()
+    return encoder.encode(str)
+}
+function serializeProof(proof: RLNGFullProof) {
+    return stringToUint8Array(JSON.stringify(proof))
+}
+function deserializeProof(serializedProof: Uint8Array): RLNGFullProof {
+    return JSON.parse(new TextDecoder().decode(serializedProof))
+}
 
 /**
  * Cretes & verifies RLN proofs
  */
 export class RLN {
+    public static protocol = '/rln/1.0.0'
     private provider: GroupDataProvider
     private identity: Identity
     public expiredTolerance: number
-    private knownNullifiers: Map<bigint, RLNGFullProof[]> // nullifier => Proof (cache)
+    private store: Datastore // nullifier => Proof (cache)
+    private lock = new AsyncLock({maxPending: 10000})
     private verifierSettings: {
         vKey: any,
         userMessageLimitMultiplier: number,
@@ -31,9 +47,32 @@ export class RLN {
         zkeyFilePath: string | Uint8Array
     }
 
-    private constructor(provider: GroupDataProvider, zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}, secret?: string) {
+    public async getProofs(nullifier: bigint) {
+        const proofs = []
+        for await (const value of this.store.query({prefix: `${RLN.protocol}/nullifiers/${nullifier.toString()}`})) {
+            proofs.push(deserializeProof(value.value))
+        }
+        return proofs
+    }
+
+    private async storeProof(nullifier: bigint, proof: RLNGFullProof) {
+        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${proof.signal}`)
+        return await this.store.put(key, serializeProof(proof))
+    }
+
+    public async deleteProof(nullifier: bigint, signal: string) {
+        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${signal}`)
+        return await this.store.delete(key)
+    }
+
+    private constructor(
+        provider: GroupDataProvider,
+        zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any},
+        secret?: string,
+        store?: Datastore
+    ) {
+        this.store = store || new MemoryDatastore()
         this.provider = provider
-        this.knownNullifiers = new Map()
         this.expiredTolerance = 0
         this.identity = new Identity(secret)
         this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
@@ -88,29 +127,35 @@ export class RLN {
         let slashes = 0
         for (let i = 0; i < proof.snarkProof.publicSignals.nullifiers.length; i++) {
             const nullifier = BigInt(proof.snarkProof.publicSignals.nullifiers[i])
-            // Same nullifier
-            const known = this.knownNullifiers.get(nullifier) || []
-            // Find any that have same nullifier and signal
-            const duplicates = known.filter(p => 
-                p.snarkProof.publicSignals.signalHash 
-                ===
-                proof.snarkProof.publicSignals.signalHash)
+            
+            const res = await this.lock.acquire(nullifier.toString(), async () => {
+                // Same nullifier
+                const known = await this.getProofs(nullifier)
+                // Find any that have same nullifier and signal
+                const duplicates = known.filter(p => 
+                    p.snarkProof.publicSignals.signalHash 
+                    ===
+                    proof.snarkProof.publicSignals.signalHash)
 
-            if (duplicates.length > 0) {
-                return VerificationResult.DUPLICATE
-            }
-            // Not a duplicate proof, add it
-            known.push(proof)
-            this.knownNullifiers.set(nullifier, known)
-            // Not a duplicate, first one with this nullifier
-            if (known.length == 1) continue
+                if (duplicates.length > 0) {
+                    return VerificationResult.DUPLICATE
+                }
+                // Not a duplicate proof, add it
+                known.push(proof)
+                await this.storeProof(nullifier, proof)
+                // Not a duplicate, first one with this nullifier
+                if (known.length == 1) return 'continue'
 
-            // We found a slashing target
-            slashes++
-            if (slashes > 1) continue // Can't slash same user twice
+                // We found a slashing target
+                slashes++
+                if (slashes > 1) return 'continue' // Can't slash same user twice
 
-            const secret = await retrieveSecret(known, i)
-            await this.provider.slash(secret)
+                const secret = await retrieveSecret(known, i)
+                await this.provider.slash(secret)
+            })
+            if (res == 'continue') continue
+            if (res == VerificationResult.DUPLICATE) return res
+            
         }
         if (slashes > 0) return VerificationResult.BREACH
 
@@ -139,11 +184,11 @@ export class RLN {
             })
 
         if (checkCache) {
-            const matches = proof.snarkProof.publicSignals
-                .nullifiers.filter(n => this.knownNullifiers.get(BigInt(n)))
-
-            if (matches.length > 0) {
-                throw new Error("Duplicate nullifier found")
+            for (const nullifier of proof.snarkProof.publicSignals.nullifiers) {
+                const proofs = await this.getProofs(BigInt(nullifier))
+                if (proofs.length > 0) {
+                    throw new Error("Duplicate nullifier found")
+                }
             }
         }
         return proof

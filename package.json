@@ -1,6 +1,6 @@
 {
   "name": "@nabladelta/rln",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "RLN library for Lambdadelta",
   "main": "src/index.ts",
   "browser": {
@@ -24,21 +24,24 @@
   "author": "reilgun",
   "license": "MIT",
   "devDependencies": {
+    "@types/async-lock": "^1.4.1",
     "@types/jest": "^29.4.0",
     "@types/node": "^20.1.7",
     "circomlib": "^2.0.5",
     "copyfiles": "^2.4.1",
+    "dotenv": "^16.3.1",
     "jest": "^29.4.3",
     "npm-run-all": "^4.1.5",
     "supertest": "^6.3.3",
     "tiny-typed-emitter": "^2.1.0",
     "ts-jest": "^29.0.5",
-    "ts-node": "^10.9.1",
-    "dotenv": "^16.3.1"
+    "ts-node": "^10.9.1"
   },
   "dependencies": {
     "@semaphore-protocol/group": "^3.2.3",
     "@semaphore-protocol/identity": "^3.2.3",
+    "async-lock": "^1.4.0",
+    "datastore-core": "^9.2.3",
     "ethers": "^6.7.1",
     "poseidon-lite": "^0.2.0",
     "rlnjs": "^3.3.0",
