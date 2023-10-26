@@ -1,5 +1,10 @@
 import { readFileSync } from "fs"
 import path from "path"
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export function getZKFiles(name: string, scheme: 'groth16' | 'plonk' = 'groth16') {
     const circuitpath = path.join(__dirname, '..', '..', 'compiled', name)
