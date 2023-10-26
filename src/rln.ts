@@ -1,14 +1,14 @@
 import { Identity } from "@semaphore-protocol/identity"
-import { GroupDataProvider } from "./providers/dataProvider"
-import { FileProvider } from "./providers/file"
-import { generateProof, nullifierInput, RLNGFullProof, verifyProof } from "./rlnProof"
-import { getZKFiles } from "./utils/files"
-import { retrieveSecret } from "./utils/recovery"
-import { GroupData, MemoryProvider } from "./providers/memory"
+import { GroupDataProvider } from "./providers/dataProvider.js"
+import { FileProvider } from "./providers/file.js"
+import { generateProof, nullifierInput, RLNGFullProof, verifyProof } from "./rlnProof.js"
+import { getZKFiles } from "./utils/files.js"
+import { retrieveSecret } from "./utils/recovery.js"
+import { GroupData, MemoryProvider } from "./providers/memory.js"
 import type { Datastore } from 'interface-datastore'
-import { MemoryDatastore } from "datastore-core"
-import { Key } from 'interface-datastore'
 import AsyncLock from 'async-lock'
+import { Key } from 'interface-datastore/key'
+import { MemoryDatastore } from "datastore-core/memory"
 
 export enum VerificationResult {
     VALID = "VALID",
@@ -27,6 +27,11 @@ function serializeProof(proof: RLNGFullProof) {
 }
 function deserializeProof(serializedProof: Uint8Array): RLNGFullProof {
     return JSON.parse(new TextDecoder().decode(serializedProof))
+}
+
+async function getMemoryStore() {
+    // const {MemoryDatastore} = await import('datastore-core/memory')
+    return new MemoryDatastore()
 }
 
 /**
@@ -68,34 +73,34 @@ export class RLN {
     private constructor(
         provider: GroupDataProvider,
         zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any},
+        store: Datastore,
         secret?: string,
-        store?: Datastore
     ) {
-        this.store = store || new MemoryDatastore()
+        this.store = store
         this.provider = provider
         this.expiredTolerance = 0
         this.identity = new Identity(secret)
         this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
     }
 
-    public static async load(secret: string, filename: string): Promise<RLN> {
+    public static async load(secret: string, filename: string, store?: Datastore): Promise<RLN> {
         const provider = await FileProvider.load(filename)
         const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
-        return new RLN(provider, {...files, scheme, vKey}, secret)
+        return new RLN(provider, {...files, scheme, vKey}, store || await getMemoryStore(), secret)
     }
 
-    public static async loadMemory(secret: string, groupData: GroupData) {
+    public static async loadMemory(secret: string, groupData: GroupData, store?: Datastore) {
         const provider = await MemoryProvider.load(groupData)
         const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
-        return new RLN(provider, {...files, scheme, vKey}, secret)
+        return new RLN(provider, {...files, scheme, vKey}, store || await getMemoryStore(), secret)
     }
 
-    public static async loadCustom(secret: string, provider: GroupDataProvider, zkFiles?: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}) {
+    public static async loadCustom(secret: string, provider: GroupDataProvider, {zkFiles, store}: {zkFiles?: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}, store?: Datastore}) {
         if (!zkFiles) {
             const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
             zkFiles = {...files, scheme, vKey}
         }
-        return new RLN(provider, zkFiles, secret)
+        return new RLN(provider, zkFiles, store || await getMemoryStore(), secret)
     }
 
     public async verify(proof: RLNGFullProof, claimedTime?: number) {
@@ -127,7 +132,7 @@ export class RLN {
         let slashes = 0
         for (let i = 0; i < proof.snarkProof.publicSignals.nullifiers.length; i++) {
             const nullifier = BigInt(proof.snarkProof.publicSignals.nullifiers[i])
-            
+
             const res = await this.lock.acquire(nullifier.toString(), async () => {
                 // Same nullifier
                 const known = await this.getProofs(nullifier)

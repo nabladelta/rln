@@ -1,7 +1,7 @@
 import { IncrementalMerkleTree } from "@zk-kit/incremental-merkle-tree"
-import { hashBigint } from "../utils/hash"
+import { hashBigint } from "../utils/hash.js"
 import { poseidon2 } from 'poseidon-lite'
-import { getTimestampInSeconds } from "../utils/time"
+import { getTimestampInSeconds } from "../utils/time.js"
 
 export type GroupEvent = {
     type: "ADD"

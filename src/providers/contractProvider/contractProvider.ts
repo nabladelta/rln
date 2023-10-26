@@ -1,7 +1,7 @@
-import { GroupDataProvider, GroupEvent } from "../dataProvider"
+import { GroupDataProvider, GroupEvent } from "../dataProvider.js"
 import { poseidon1 } from 'poseidon-lite'
 import { ethers } from "ethers"
-import { RLNContract } from "./contractWrapper"
+import { RLNContract } from "./contractWrapper.js"
 import { WithdrawProver } from 'rlnjs'
 import crypto from 'crypto'
 import { Identity } from "@semaphore-protocol/identity"

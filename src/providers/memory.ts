@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "fs/promises"
-import { GroupDataProvider, GroupEvent } from "./dataProvider"
+import { GroupDataProvider, GroupEvent } from "./dataProvider.js"
 import { poseidon1 } from 'poseidon-lite'
 
 export interface GroupData {

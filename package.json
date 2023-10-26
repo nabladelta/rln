@@ -1,6 +1,6 @@
 {
   "name": "@nabladelta/rln",
-  "version": "1.0.15",
+  "version": "1.0.18",
   "description": "RLN library for Lambdadelta",
   "main": "src/index.ts",
   "browser": {
@@ -8,7 +8,9 @@
     "path": false,
     "fs/promises": false
   },
+  "type": "module",
   "repository": "https://github.com/nabladelta/rln",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     "import": "./dist/src/index.js",
     "require": "./dist/src/index.js",
@@ -42,6 +44,7 @@
     "@semaphore-protocol/identity": "^3.2.3",
     "async-lock": "^1.4.0",
     "datastore-core": "^9.2.3",
+    "esm": "^3.2.25",
     "ethers": "^6.7.1",
     "poseidon-lite": "^0.2.0",
     "rlnjs": "^3.3.0",

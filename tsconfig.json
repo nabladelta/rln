@@ -1,14 +1,15 @@
 {
     "compilerOptions": {
       "incremental": true,
-      "target": "es2022",
-      "module": "commonjs",
+      "module": "ESNext", // change from "commonjs" to "ESNext"
+      "target": "ESNext", // make sure the target is ESNext or a recent version of ECMAScript  
       "declaration": true,
       "strict": true,
       "moduleResolution": "node",
       "esModuleInterop": true,
       "skipLibCheck": true,
       "forceConsistentCasingInFileNames": true,
+      "allowSyntheticDefaultImports": true,
       "rootDir": "./",
       "outDir": "./dist",
       "typeRoots": [
