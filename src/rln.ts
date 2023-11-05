@@ -61,12 +61,12 @@ export class RLN {
     }
 
     private async storeProof(nullifier: bigint, proof: RLNGFullProof) {
-        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${proof.signal}`)
+        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${proof.snarkProof.publicSignals.signalHash}`)
         return await this.store.put(key, serializeProof(proof))
     }
 
-    public async deleteProof(nullifier: bigint, signal: string) {
-        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${signal}`)
+    public async deleteProof(nullifier: bigint, signalHash: string) {
+        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${signalHash}`)
         return await this.store.delete(key)
     }
 
@@ -171,7 +171,8 @@ export class RLN {
             signal: string,
             externalNullifiers: nullifierInput[],
             rlnIdentifier: string,
-            checkCache: boolean = false) {
+            checkCache: boolean = false,
+            allowDuplicate: boolean = false) {
 
         const merkleProof = this.provider
             .createMerkleProof(
@@ -190,10 +191,19 @@ export class RLN {
 
         if (checkCache) {
             for (const nullifier of proof.snarkProof.publicSignals.nullifiers) {
-                const proofs = await this.getProofs(BigInt(nullifier))
-                if (proofs.length > 0) {
-                    throw new Error("Duplicate nullifier found")
-                }
+                const res = await this.lock.acquire(nullifier.toString(), async () => {
+                    const proofs = await this.getProofs(BigInt(nullifier))
+
+                    if (proofs.length > 0) {
+                        if (!allowDuplicate) return VerificationResult.DUPLICATE
+
+                        const differentSignalHash = proofs.filter(p => p.snarkProof.publicSignals.signalHash != proof.snarkProof.publicSignals.signalHash)
+                        if (differentSignalHash.length > 0) return VerificationResult.BREACH
+                    }
+                    await this.storeProof(BigInt(nullifier), proof)
+                })
+                if (res === VerificationResult.DUPLICATE) throw new Error("Duplicate nullifier found")
+                if (res === VerificationResult.BREACH) throw new Error("Duplicate signal hash found")
             }
         }
         return proof
