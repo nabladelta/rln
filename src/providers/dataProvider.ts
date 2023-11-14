@@ -33,6 +33,23 @@ export abstract class GroupDataProvider {
         this.multipliers = new Map()
         this.lastEvent = 0
     }
+    /**
+     * Returns false if the merkle root was expired at the given timestamp
+     * This should be based on things like the group contract's FREEZE_PERIOD,
+     * depending on the implementation.
+     * @param root merkle root
+     * @param timestamp reference timestamp
+     */
+    public async isRootNotExpiredAt(root: bigint, timestamp: number) {
+        const [addedTime, removedTime] = await this.getRootTimeRange(root)
+        if (addedTime && removedTime) {
+            return addedTime <= timestamp && timestamp < removedTime
+        }
+        if (addedTime && !removedTime) {
+            return addedTime <= timestamp
+        }
+        return false
+    }
 
     public async update() {
         const events = await this.loadEvents(this.lastEvent)
@@ -65,6 +82,11 @@ export abstract class GroupDataProvider {
         return [undefined, undefined]
     }
 
+    /**
+     * Returns the time range for the given merkle root, if it exists.
+     * @param root A merkle root for this group
+     * @returns [addedTime, removedTime] or [undefined, undefined] if the root does not exist.
+     */
     public async getRootTimeRange(root: bigint) {
         const [addedTime, removedTime] = this.getRootTimeRangeLocal(root)
         if (addedTime) return [addedTime, removedTime]

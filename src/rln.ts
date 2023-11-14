@@ -8,7 +8,8 @@ import { GroupData, MemoryProvider } from "./providers/memory.js"
 import type { Datastore } from 'interface-datastore'
 import AsyncLock from 'async-lock'
 import { Key } from 'interface-datastore/key'
-import { MemoryDatastore } from "datastore-core/memory"
+import { MemoryDatastore, NamespaceDatastore } from "datastore-core"
+import { getTimestampInSeconds } from "./utils/time.js"
 
 export enum VerificationResult {
     VALID = "VALID",
@@ -29,11 +30,6 @@ function deserializeProof(serializedProof: Uint8Array): RLNGFullProof {
     return JSON.parse(new TextDecoder().decode(serializedProof))
 }
 
-async function getMemoryStore() {
-    // const {MemoryDatastore} = await import('datastore-core/memory')
-    return new MemoryDatastore()
-}
-
 /**
  * Cretes & verifies RLN proofs
  */
@@ -41,7 +37,6 @@ export class RLN {
     public static protocol = '/rln/1.0.0'
     private provider: GroupDataProvider
     private identity: Identity
-    public expiredTolerance: number
     private store: Datastore // nullifier => Proof (cache)
     private lock = new AsyncLock({maxPending: 10000})
     private verifierSettings: {
@@ -54,31 +49,44 @@ export class RLN {
 
     public async getProofs(nullifier: bigint) {
         const proofs = []
-        for await (const value of this.store.query({prefix: `${RLN.protocol}/nullifiers/${nullifier.toString()}`})) {
+        for await (const value of this.store.query({prefix: `/nullifiers/${nullifier.toString(16)}`})) {
             proofs.push(deserializeProof(value.value))
         }
         return proofs
     }
 
-    private async storeProof(nullifier: bigint, proof: RLNGFullProof) {
-        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${proof.snarkProof.publicSignals.signalHash}`)
-        return await this.store.put(key, serializeProof(proof))
+    private async storeProof(proof: RLNGFullProof) {
+        for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
+            // Ensure nullifier serialization is consistent
+            const standardNullifierString = BigInt(nullifierString).toString(16)
+            const key = new Key(`/nullifiers/${standardNullifierString}/${proof.snarkProof.publicSignals.signalHash}`)
+            await this.store.put(key, serializeProof(proof))
+        }
     }
 
-    public async deleteProof(nullifier: bigint, signalHash: string) {
-        const key = new Key(`${RLN.protocol}/nullifiers/${nullifier.toString()}/${signalHash}`)
-        return await this.store.delete(key)
+    public async deleteProof(proof: RLNGFullProof) {
+        for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
+            // Ensure nullifier serialization is consistent
+            const standardNullifierString = BigInt(nullifierString).toString(16)
+            const key = new Key(`/nullifiers/${standardNullifierString}/${proof.snarkProof.publicSignals.signalHash}`)
+            await this.store.delete(key)
+        }
+    }
+
+    public async deleteProofs(nullifier: bigint) {
+        for await (const value of this.store.query({prefix: `/nullifiers/${nullifier.toString(16)}`})) {
+            this.store.delete(value.key)
+        }
     }
 
     private constructor(
         provider: GroupDataProvider,
         zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any},
-        store: Datastore,
+        store?: Datastore,
         secret?: string,
     ) {
-        this.store = store
+        this.store = new NamespaceDatastore(store || new MemoryDatastore(), new Key(RLN.protocol))
         this.provider = provider
-        this.expiredTolerance = 0
         this.identity = new Identity(secret)
         this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
     }
@@ -86,13 +94,13 @@ export class RLN {
     public static async load(secret: string, filename: string, store?: Datastore): Promise<RLN> {
         const provider = await FileProvider.load(filename)
         const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
-        return new RLN(provider, {...files, scheme, vKey}, store || await getMemoryStore(), secret)
+        return new RLN(provider, {...files, scheme, vKey}, store, secret)
     }
 
     public static async loadMemory(secret: string, groupData: GroupData, store?: Datastore) {
         const provider = await MemoryProvider.load(groupData)
         const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
-        return new RLN(provider, {...files, scheme, vKey}, store || await getMemoryStore(), secret)
+        return new RLN(provider, {...files, scheme, vKey}, store, secret)
     }
 
     public static async loadCustom(secret: string, provider: GroupDataProvider, {zkFiles, store}: {zkFiles?: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any}, store?: Datastore}) {
@@ -100,67 +108,60 @@ export class RLN {
             const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
             zkFiles = {...files, scheme, vKey}
         }
-        return new RLN(provider, zkFiles, store || await getMemoryStore(), secret)
+        return new RLN(provider, zkFiles, store, secret)
     }
 
     public async verify(proof: RLNGFullProof, claimedTime?: number) {
-        const root = proof.snarkProof.publicSignals.merkleRoot
-        const [start, end] = await this.provider.getRootTimeRange(BigInt(root))
+        const root = BigInt(proof.snarkProof.publicSignals.merkleRoot)
+        const [start, end] = await this.provider.getRootTimeRange(root)
         if (!start) return VerificationResult.MISSING_ROOT
 
         const result = await verifyProof(proof, this.verifierSettings)
 
         if (!result) return VerificationResult.INVALID
         if (!claimedTime) return VerificationResult.VALID
-        if (!end
-            && claimedTime >= start)
-                return VerificationResult.VALID
-        if (end
-            && claimedTime >= start 
-            && claimedTime <= (end + this.expiredTolerance)) 
-                return VerificationResult.VALID
 
-        return VerificationResult.OUT_OF_RANGE
+        if (!(await this.provider.isRootNotExpiredAt(root, claimedTime))) return VerificationResult.OUT_OF_RANGE
+
+        return VerificationResult.VALID
     }
 
-    public async submitProof(proof: RLNGFullProof, claimedTime?: number) {
+    public async submitProof(proof: RLNGFullProof, claimedTime?: number, skipSlashing: boolean = false) {
         const res = await this.verify(proof, claimedTime)
         if (res == VerificationResult.INVALID || res == VerificationResult.MISSING_ROOT) {
             // There is no point in storing a proof that is either not correct, or from a different group
             return res
         }
+        // Store proof
+        await this.storeProof(proof)
+
         let slashes = 0
         for (let i = 0; i < proof.snarkProof.publicSignals.nullifiers.length; i++) {
-            const nullifier = BigInt(proof.snarkProof.publicSignals.nullifiers[i])
-
-            const res = await this.lock.acquire(nullifier.toString(), async () => {
-                // Same nullifier
-                const known = await this.getProofs(nullifier)
-                // Find any that have same nullifier and signal
-                const duplicates = known.filter(p => 
+            const nullifierString = proof.snarkProof.publicSignals.nullifiers[i]
+            await this.lock.acquire(nullifierString, async () => {
+                // Proofs with same nullifier
+                const knownProofs = await this.getProofs(BigInt(nullifierString))
+                // Find any that have same nullifier and a different signal
+                const uniqueSignals = knownProofs.filter(p => 
                     p.snarkProof.publicSignals.signalHash 
-                    ===
+                    !==
                     proof.snarkProof.publicSignals.signalHash)
-
-                if (duplicates.length > 0) {
-                    return VerificationResult.DUPLICATE
-                }
-                // Not a duplicate proof, add it
-                known.push(proof)
-                await this.storeProof(nullifier, proof)
-                // Not a duplicate, first one with this nullifier
-                if (known.length == 1) return 'continue'
+                
+                // Only one signal with this nullifier
+                if (uniqueSignals.length == 1) return
 
                 // We found a slashing target
                 slashes++
-                if (slashes > 1) return 'continue' // Can't slash same user twice
+                if (slashes > 1 || skipSlashing) return // Can't slash same user twice, or if we are skipping slashing
 
-                const secret = await retrieveSecret(known, i)
+                const secret = await retrieveSecret(uniqueSignals, i)
                 await this.provider.slash(secret)
+                // Delete this proof after slashing.
+                // If we don't it will just be in the store forever since the end-user 
+                // of this library will know this proof was rejected, and won't store it, 
+                // so he won't delete it later either.
+                await this.deleteProof(proof)
             })
-            if (res == 'continue') continue
-            if (res == VerificationResult.DUPLICATE) return res
-            
         }
         if (slashes > 0) return VerificationResult.BREACH
 
@@ -171,8 +172,7 @@ export class RLN {
             signal: string,
             externalNullifiers: nullifierInput[],
             rlnIdentifier: string,
-            checkCache: boolean = false,
-            allowDuplicate: boolean = false) {
+            checkCache: boolean = false) {
 
         const merkleProof = this.provider
             .createMerkleProof(
@@ -190,21 +190,8 @@ export class RLN {
             })
 
         if (checkCache) {
-            for (const nullifier of proof.snarkProof.publicSignals.nullifiers) {
-                const res = await this.lock.acquire(nullifier.toString(), async () => {
-                    const proofs = await this.getProofs(BigInt(nullifier))
-
-                    if (proofs.length > 0) {
-                        if (!allowDuplicate) return VerificationResult.DUPLICATE
-
-                        const differentSignalHash = proofs.filter(p => p.snarkProof.publicSignals.signalHash != proof.snarkProof.publicSignals.signalHash)
-                        if (differentSignalHash.length > 0) return VerificationResult.BREACH
-                    }
-                    await this.storeProof(BigInt(nullifier), proof)
-                })
-                if (res === VerificationResult.DUPLICATE) throw new Error("Duplicate nullifier found")
-                if (res === VerificationResult.BREACH) throw new Error("Duplicate signal hash found")
-            }
+            const res = await this.submitProof(proof, getTimestampInSeconds(), true)
+            if (res === VerificationResult.BREACH) throw new Error("RLN breach detected")
         }
         return proof
     }
