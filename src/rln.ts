@@ -47,6 +47,28 @@ export class RLN {
         zkeyFilePath: string | Uint8Array
     }
 
+    private constructor(
+        provider: GroupDataProvider,
+        zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any},
+        store?: Datastore,
+        secret?: string,
+    ) {
+        this.store = new NamespaceDatastore(store || new MemoryDatastore(), new Key(RLN.protocol))
+        this.provider = provider
+        this.identity = new Identity(secret)
+        this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
+    }
+
+    public async isProofStored(proof: RLNGFullProof) {
+        for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
+            // Ensure nullifier serialization is consistent
+            const standardNullifierString = BigInt(nullifierString).toString(16)
+            const key = new Key(`/nullifiers/${standardNullifierString}/${proof.snarkProof.publicSignals.signalHash}`)
+            if (!(await this.store.has(key))) return false
+        }
+        return true
+    }
+
     public async getProofs(nullifier: bigint) {
         const proofs = []
         for await (const value of this.store.query({prefix: `/nullifiers/${nullifier.toString(16)}`})) {
@@ -79,18 +101,6 @@ export class RLN {
         }
     }
 
-    private constructor(
-        provider: GroupDataProvider,
-        zkFiles: {wasmFilePath: string | Uint8Array, zkeyFilePath: string | Uint8Array, scheme: 'groth16' | 'plonk', vKey: any},
-        store?: Datastore,
-        secret?: string,
-    ) {
-        this.store = new NamespaceDatastore(store || new MemoryDatastore(), new Key(RLN.protocol))
-        this.provider = provider
-        this.identity = new Identity(secret)
-        this.verifierSettings = {...zkFiles, userMessageLimitMultiplier: this.provider.getMultiplier(this.identity.commitment)!}
-    }
-
     public static async load(secret: string, filename: string, store?: Datastore): Promise<RLN> {
         const provider = await FileProvider.load(filename)
         const {files, scheme, vKey} = getZKFiles('rln-multiplier-generic', 'groth16')
@@ -111,12 +121,12 @@ export class RLN {
         return new RLN(provider, zkFiles, store, secret)
     }
 
-    public async verify(proof: RLNGFullProof, claimedTime?: number) {
+    public async verify(proof: RLNGFullProof, claimedTime?: number, skipVerification: boolean = false) {
         const root = BigInt(proof.snarkProof.publicSignals.merkleRoot)
         const [start, end] = await this.provider.getRootTimeRange(root)
         if (!start) return VerificationResult.MISSING_ROOT
 
-        const result = await verifyProof(proof, this.verifierSettings)
+        const result = await verifyProof(proof, {...this.verifierSettings, skipVerification})
 
         if (!result) return VerificationResult.INVALID
         if (!claimedTime) return VerificationResult.VALID
@@ -127,13 +137,14 @@ export class RLN {
     }
 
     public async submitProof(proof: RLNGFullProof, claimedTime?: number, skipSlashing: boolean = false) {
-        const res = await this.verify(proof, claimedTime)
+        const alreadyStored = await this.isProofStored(proof)
+        const res = await this.verify(proof, claimedTime, alreadyStored)
         if (res == VerificationResult.INVALID || res == VerificationResult.MISSING_ROOT) {
             // There is no point in storing a proof that is either not correct, or from a different group
             return res
         }
         // Store proof
-        await this.storeProof(proof)
+        if (!alreadyStored) await this.storeProof(proof)
 
         let slashes = 0
         for (let i = 0; i < proof.snarkProof.publicSignals.nullifiers.length; i++) {

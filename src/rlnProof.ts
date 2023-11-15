@@ -10,7 +10,8 @@ export async function verifyProof(
         rlnFullProof: RLNGFullProof,
         config: {
             vKey: any,
-            scheme: 'groth16' | 'plonk'
+            scheme: 'groth16' | 'plonk',
+            skipVerification?: boolean
         }
     ): Promise<boolean> {
     const { publicSignals, proof } = rlnFullProof.snarkProof
@@ -35,7 +36,10 @@ export async function verifyProof(
     if (expectedSignalHash !== BigInt(publicSignals.signalHash)) {
         return false
     }
-    let { scheme, vKey } = config
+    let { scheme, vKey, skipVerification } = config
+    if (skipVerification === true) {
+        return true
+    }
     const prover = scheme === 'plonk' ? plonk : groth16
     return prover.verify(
         vKey,
