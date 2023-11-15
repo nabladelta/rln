@@ -243,9 +243,14 @@ export class RLN {
 
         if (useCache) {
             const proofs = await this.getMatchingProofs(signal, rlnIdentifier, externalNullifiers)
-            if (proofs.length > 0) return proofs[0]
+            if (proofs.length > 0) {
+                const res = await this.submitProof(proofs[0], getTimestampInSeconds(), true)
+                if (res !== VerificationResult.VALID) {
+                    return proofs[0]
+                }
+            }
         }
-        
+
         const merkleProof = this.provider
             .createMerkleProof(
                 this.identity.commitment,
