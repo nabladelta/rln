@@ -10,6 +10,7 @@ import AsyncLock from 'async-lock'
 import { Key } from 'interface-datastore/key'
 import { MemoryDatastore, NamespaceDatastore } from "datastore-core"
 import { getTimestampInSeconds } from "./utils/time.js"
+import { hashString } from "./utils/hash.js"
 
 export enum VerificationResult {
     VALID = "VALID",
@@ -87,6 +88,7 @@ export class RLN {
     }
 
     public async deleteProof(proof: RLNGFullProof) {
+        await this.deleteSignalToNullifierMapping(proof)
         for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
             // Ensure nullifier serialization is consistent
             const standardNullifierString = BigInt(nullifierString).toString(16)
@@ -95,10 +97,63 @@ export class RLN {
         }
     }
 
-    public async deleteProofs(nullifier: bigint) {
-        for await (const value of this.store.query({prefix: `/nullifiers/${nullifier.toString(16)}`})) {
-            this.store.delete(value.key)
+    private async storeSignalToNullifierMapping(proof: RLNGFullProof) {
+        for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
+            const nullifier = BigInt(nullifierString)
+            const signalHash = proof.snarkProof.publicSignals.signalHash
+            const dummyUint8Array = new Uint8Array(1)
+            await this.store.put(new Key(`/signals/${signalHash}/${nullifier.toString(16)}/`), dummyUint8Array)
         }
+    }
+
+    private async deleteSignalToNullifierMapping(proof: RLNGFullProof) {
+        for (const nullifierString of proof.snarkProof.publicSignals.nullifiers) {
+            const nullifier = BigInt(nullifierString)
+            const signalHash = proof.snarkProof.publicSignals.signalHash
+            await this.store.delete(new Key(`/signals/${signalHash}/${nullifier.toString(16)}/`))
+        }
+    }
+
+    private async getNullifiersForSignal(signalHash: string) {
+        const nullifiers = []
+        for await (const value of this.store.query({prefix: `/signals/${signalHash}`})) {
+            const nullifier = BigInt(value.key.toString().split('/')[3])
+            nullifiers.push(nullifier)
+        }
+        return nullifiers
+    }
+
+    public async getProofsForSignal(signalHash: string) {
+        const nullifiers = await this.getNullifiersForSignal(signalHash)
+        const proofs = []
+        for (const nullifier of nullifiers) {
+            try {
+                const proofBuf = await this.store.get(new Key(`/signals/${signalHash}/${nullifier.toString(16)}/`))
+                const proof = deserializeProof(proofBuf)
+                proofs.push(proof)
+            } catch (e) {}
+        }
+        return proofs
+    }
+
+    public async getMatchingProofs(signal: string, rlnIdentifier: string, externalNullifiers: nullifierInput[]) {
+        const signalHash = hashString(signal)
+        const signalHashString = signalHash.toString(16)
+        const proofs = await this.getProofsForSignal(signalHashString)
+        return proofs.filter(p => {
+            if (
+                p.snarkProof.publicSignals.signalHash === signalHashString 
+                && p.rlnIdentifier === rlnIdentifier
+                && p.externalNullifiers.length === externalNullifiers.length
+            ) {
+                for (let i = 0; i < externalNullifiers.length; i++) {
+                    if (p.externalNullifiers[i].nullifier !== externalNullifiers[i].nullifier) return false
+                    if (p.externalNullifiers[i].messageLimit !== externalNullifiers[i].messageLimit) return false
+                }
+                return true
+            }
+            return false
+        })
     }
 
     public static async load(secret: string, filename: string, store?: Datastore): Promise<RLN> {
@@ -183,8 +238,14 @@ export class RLN {
             signal: string,
             externalNullifiers: nullifierInput[],
             rlnIdentifier: string,
-            checkCache: boolean = false) {
+            useCache: boolean = false
+        ) {
 
+        if (useCache) {
+            const proofs = await this.getMatchingProofs(signal, rlnIdentifier, externalNullifiers)
+            if (proofs.length > 0) return proofs[0]
+        }
+        
         const merkleProof = this.provider
             .createMerkleProof(
                 this.identity.commitment,
@@ -200,9 +261,10 @@ export class RLN {
                ...this.verifierSettings
             })
 
-        if (checkCache) {
+        if (useCache) {
             const res = await this.submitProof(proof, getTimestampInSeconds(), true)
-            if (res === VerificationResult.BREACH) throw new Error("RLN breach detected")
+            if (res !== VerificationResult.VALID) throw new Error(`RLN proof is not valid: ${res}`)
+            await this.storeSignalToNullifierMapping(proof)
         }
         return proof
     }
